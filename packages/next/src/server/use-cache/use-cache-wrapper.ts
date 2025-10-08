@@ -71,6 +71,7 @@ import { createLazyResult, isResolvedLazyResult } from '../lib/lazy-result'
 import { dynamicAccessAsyncStorage } from '../app-render/dynamic-access-async-storage.external'
 import { isReactLargeShellError } from '../app-render/react-large-shell-error'
 import type { CacheLife } from './cache-life'
+import { RenderStage } from '../app-render/staged-rendering'
 
 interface PrivateCacheContext {
   readonly kind: 'private'
@@ -1016,7 +1017,11 @@ export function cache(
               // of a dev request, so we delay them.
               // When we implement the 3-task render, this will change to match the codepath above.
               // (to resolve them in the runtime stage, and not later)
-              await makeDevtoolsIOAwarePromise(undefined)
+              await makeDevtoolsIOAwarePromise(
+                undefined,
+                outerWorkUnitStore,
+                RenderStage.Runtime
+              )
             }
             break
           }
@@ -1276,7 +1281,11 @@ export function cache(
                     // TODO(restart-on-cache-miss): Optimize this to avoid unnecessary restarts.
                     // We don't end the cache read here, so this will always appear as a cache miss in the static stage,
                     // and thus will cause a restart even if all caches are filled.
-                    await makeDevtoolsIOAwarePromise(undefined)
+                    await makeDevtoolsIOAwarePromise(
+                      undefined,
+                      workUnitStore,
+                      RenderStage.Runtime
+                    )
                   }
                   break
                 }
@@ -1473,7 +1482,11 @@ export function cache(
                 // TODO(restart-on-cache-miss): Optimize this to avoid unnecessary restarts.
                 // We don't end the cache read here, so this will always appear as a cache miss in the static stage,
                 // and thus will cause a restart even if all caches are filled.
-                await makeDevtoolsIOAwarePromise(undefined)
+                await makeDevtoolsIOAwarePromise(
+                  undefined,
+                  workUnitStore,
+                  RenderStage.Runtime
+                )
               }
               break
             }

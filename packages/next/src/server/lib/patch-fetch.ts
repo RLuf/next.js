@@ -29,6 +29,7 @@ import {
 } from '../response-cache'
 import { cloneResponse } from './clone-response'
 import type { IncrementalCache } from './incremental-cache'
+import { RenderStage } from '../app-render/staged-rendering'
 
 const isEdgeRuntime = process.env.NEXT_RUNTIME === 'edge'
 
@@ -288,14 +289,6 @@ export function createPatchedFetcher(
     if (cacheSignal) {
       cacheSignal.beginRead()
     }
-
-    const isStagedRenderingInDev = !!(
-      process.env.NODE_ENV === 'development' &&
-      process.env.__NEXT_CACHE_COMPONENTS &&
-      workUnitStore &&
-      // eslint-disable-next-line no-restricted-syntax
-      workUnitStore.type === 'request'
-    )
 
     const result = getTracer().trace(
       isInternal ? NextNodeServerSpan.internalFetch : AppRenderSpan.fetch,
@@ -564,14 +557,16 @@ export function createPatchedFetcher(
             case 'request':
               if (
                 process.env.NODE_ENV === 'development' &&
-                isStagedRenderingInDev
+                workUnitStore.stagedRendering
               ) {
                 if (cacheSignal) {
                   cacheSignal.endRead()
                   cacheSignal = null
                 }
-                // TODO(restart-on-cache-miss): block dynamic when filling caches
-                await getTimeoutBoundary()
+                await workUnitStore.stagedRendering.delayUntilStage(
+                  RenderStage.Dynamic,
+                  undefined
+                )
               }
               break
             case 'prerender-ppr':
@@ -689,14 +684,16 @@ export function createPatchedFetcher(
                 case 'request':
                   if (
                     process.env.NODE_ENV === 'development' &&
-                    isStagedRenderingInDev
+                    workUnitStore.stagedRendering
                   ) {
                     if (cacheSignal) {
                       cacheSignal.endRead()
                       cacheSignal = null
                     }
-                    // TODO(restart-on-cache-miss): block dynamic when filling caches
-                    await getTimeoutBoundary()
+                    await workUnitStore.stagedRendering.delayUntilStage(
+                      RenderStage.Dynamic,
+                      undefined
+                    )
                   }
                   break
                 case 'prerender-ppr':
@@ -875,7 +872,7 @@ export function createPatchedFetcher(
                   case 'request':
                     if (
                       process.env.NODE_ENV === 'development' &&
-                      isStagedRenderingInDev &&
+                      workUnitStore.stagedRendering &&
                       workUnitStore.cacheSignal
                     ) {
                       // We're filling caches for a staged render,
@@ -964,9 +961,12 @@ export function createPatchedFetcher(
                 case 'request':
                   if (
                     process.env.NODE_ENV === 'development' &&
-                    isStagedRenderingInDev
+                    workUnitStore.stagedRendering
                   ) {
-                    await getTimeoutBoundary()
+                    await workUnitStore.stagedRendering.delayUntilStage(
+                      RenderStage.Dynamic,
+                      undefined
+                    )
                   }
                   break
                 case 'prerender-ppr':
@@ -1052,7 +1052,13 @@ export function createPatchedFetcher(
         }
 
         if (
-          (workStore.isStaticGeneration || isStagedRenderingInDev) &&
+          (workStore.isStaticGeneration ||
+            (process.env.NODE_ENV === 'development' &&
+              process.env.__NEXT_CACHE_COMPONENTS &&
+              workUnitStore &&
+              // eslint-disable-next-line no-restricted-syntax
+              workUnitStore.type === 'request' &&
+              workUnitStore.stagedRendering)) &&
           init &&
           typeof init === 'object'
         ) {
@@ -1080,14 +1086,16 @@ export function createPatchedFetcher(
                 case 'request':
                   if (
                     process.env.NODE_ENV === 'development' &&
-                    isStagedRenderingInDev
+                    workUnitStore.stagedRendering
                   ) {
                     if (cacheSignal) {
                       cacheSignal.endRead()
                       cacheSignal = null
                     }
-                    // TODO(restart-on-cache-miss): block dynamic when filling caches
-                    await getTimeoutBoundary()
+                    await workUnitStore.stagedRendering.delayUntilStage(
+                      RenderStage.Dynamic,
+                      undefined
+                    )
                   }
                   break
                 case 'prerender-ppr':
@@ -1129,10 +1137,12 @@ export function createPatchedFetcher(
                   case 'request':
                     if (
                       process.env.NODE_ENV === 'development' &&
-                      isStagedRenderingInDev
+                      workUnitStore.stagedRendering
                     ) {
-                      // TODO(restart-on-cache-miss): block dynamic when filling caches
-                      await getTimeoutBoundary()
+                      await workUnitStore.stagedRendering.delayUntilStage(
+                        RenderStage.Dynamic,
+                        undefined
+                      )
                     }
                     break
                   case 'cache':

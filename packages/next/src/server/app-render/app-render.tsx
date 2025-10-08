@@ -168,10 +168,7 @@ import {
   prerenderAndAbortInSequentialTasks,
 } from './app-render-prerender-utils'
 import { printDebugThrownValueForProspectiveRender } from './prospective-render-utils'
-import {
-  pipelineInSequentialTasks,
-  scheduleInSequentialTasks,
-} from './app-render-render-utils'
+import { pipelineInSequentialTasks3 } from './app-render-render-utils'
 import { waitAtLeastOneReactRenderTask } from '../../lib/scheduler'
 import {
   workUnitAsyncStorage,
@@ -212,6 +209,7 @@ import {
 import type { ExperimentalConfig } from '../config-shared'
 import type { Params } from '../request/params'
 import { createPromiseWithResolvers } from '../../shared/lib/promise-with-resolvers'
+import { RenderStage, StagedRenderingController } from './staged-rendering'
 
 export type GetDynamicParamFromSegment = (
   // [slug] / [[slug]] / [...slug]
@@ -2203,8 +2201,21 @@ async function renderToStream(
         )
       }
 
-      const environmentName = () =>
-        requestStore.prerenderPhase === true ? 'Prerender' : 'Server'
+      const environmentName = () => {
+        const currentStage = requestStore.stagedRendering!.currentStage
+        switch (currentStage) {
+          case RenderStage.Static:
+            return 'Prerender'
+          case RenderStage.Runtime:
+            // TODO: only label as "Prefetch" if the page has a `prefetch` config.
+            return 'Prefetch'
+          case RenderStage.Dynamic:
+            return 'Server'
+          default:
+            currentStage satisfies never
+            throw new InvariantError(`Invalid render stage: ${currentStage}`)
+        }
+      }
 
       // Try to render the page and see if there's any cache misses.
       // If there are, wait for caches to finish and restart the render.
@@ -2220,13 +2231,18 @@ async function renderToStream(
 
       const prerenderResumeDataCache = createPrerenderResumeDataCache()
 
+      const initialRenderReactController = new AbortController() // Controls the react render
+      const initialRenderDataController = new AbortController() // Controls hanging promises we create
+      const initialRenderStageController = new StagedRenderingController(
+        initialRenderDataController.signal
+      )
+
       requestStore.prerenderResumeDataCache = prerenderResumeDataCache
       // `getRenderResumeDataCache` will fall back to using `prerenderResumeDataCache` as `renderResumeDataCache`,
       // so not having a resume data cache won't break any expectations in case we don't need to restart.
       requestStore.renderResumeDataCache = null
+      requestStore.stagedRendering = initialRenderStageController
       requestStore.cacheSignal = cacheSignal
-
-      const initialRenderReactController = new AbortController()
 
       const intialRenderDebugChannel =
         setReactDebugChannel && createDebugChannel()
@@ -2235,11 +2251,10 @@ async function renderToStream(
       const maybeInitialServerStream = await workUnitAsyncStorage.run(
         requestStore,
         () =>
-          pipelineInSequentialTasks(
+          pipelineInSequentialTasks3(
             () => {
               // Static stage
-              requestStore.prerenderPhase = true
-              return ComponentMod.renderToReadableStream(
+              const stream = ComponentMod.renderToReadableStream(
                 initialRscPayload,
                 clientReferenceManifest.clientModules,
                 {
@@ -2250,21 +2265,53 @@ async function renderToStream(
                   signal: initialRenderReactController.signal,
                 }
               )
+              // If we abort the render, we want to reject the stage-dependent promises as well.
+              // Note that we want to install this listener after the render is started
+              // so that it runs after react is finished running its abort code.
+              initialRenderReactController.signal.addEventListener(
+                'abort',
+                () => {
+                  initialRenderDataController.abort(
+                    initialRenderReactController.signal.reason
+                  )
+                }
+              )
+              return stream
             },
-            async (stream) => {
-              // Dynamic stage
-              // Note: if we had cache misses, things that would've happened statically otherwise
-              // may be marked as dynamic instead.
-              requestStore.prerenderPhase = false
+            (stream) => {
+              // Runtime stage
+              initialRenderStageController.advanceStage(RenderStage.Runtime)
 
               // If all cache reads initiated in the static stage have completed,
               // then all of the necessary caches have to be warm (or there's no caches on the page).
               // On the other hand, if we still have pending cache reads, then we had a cache miss,
               // and the static stage didn't render all the content that it normally would have.
-              const hadCacheMiss = cacheSignal.hasPendingReads()
-              if (!hadCacheMiss) {
+              if (!cacheSignal.hasPendingReads()) {
                 // No cache misses. We can use the stream as is.
                 return stream
+              } else {
+                // Cache miss. We'll discard this stream, and render again.
+                return null
+              }
+            },
+            async (maybeStream) => {
+              // Dynamic stage
+
+              if (maybeStream === null) {
+                // If we had cache misses in either of the previous stages, then we'll only use this render for filling caches.
+                // We won't advance the stage, and thus leave dynamic APIs hanging,
+                // because they won't be cached anyway, so it'd be wasted work.
+                return null
+              }
+
+              // Note: if we had cache misses, things that would've happened statically otherwise
+              // may be marked as dynamic instead.
+              initialRenderStageController.advanceStage(RenderStage.Dynamic)
+
+              // Analogous to the previous stage.
+              if (!cacheSignal.hasPendingReads()) {
+                // No cache misses. We can use the stream as is.
+                return maybeStream
               } else {
                 // Cache miss. We'll discard this stream, and render again.
                 return null
@@ -2301,11 +2348,14 @@ async function renderToStream(
         // Now, we need to do another render.
         requestStore = createRequestStore()
 
+        const finalRenderStageController = new StagedRenderingController()
+
         // We've filled the caches, so now we can render as usual.
         requestStore.prerenderResumeDataCache = null
         requestStore.renderResumeDataCache = createRenderResumeDataCache(
           prerenderResumeDataCache
         )
+        requestStore.stagedRendering = finalRenderStageController
         requestStore.cacheSignal = null
 
         // The initial render already wrote to its debug channel. We're not using it,
@@ -2320,25 +2370,32 @@ async function renderToStream(
         const finalRscPayload = await getPayload()
         const finalServerStream = await workUnitAsyncStorage.run(
           requestStore,
-          scheduleInSequentialTasks,
-          () => {
-            // Static stage
-            requestStore.prerenderPhase = true
-            return ComponentMod.renderToReadableStream(
-              finalRscPayload,
-              clientReferenceManifest.clientModules,
-              {
-                onError: serverComponentsErrorHandler,
-                environmentName,
-                filterStackFrame,
-                debugChannel: finalRenderDebugChannel?.serverSide,
+          () =>
+            pipelineInSequentialTasks3(
+              () => {
+                // Static stage
+                return ComponentMod.renderToReadableStream(
+                  finalRscPayload,
+                  clientReferenceManifest.clientModules,
+                  {
+                    onError: serverComponentsErrorHandler,
+                    environmentName,
+                    filterStackFrame,
+                    debugChannel: finalRenderDebugChannel?.serverSide,
+                  }
+                )
+              },
+              (stream) => {
+                // Runtime stage
+                finalRenderStageController.advanceStage(RenderStage.Runtime)
+                return stream
+              },
+              (stream) => {
+                // Dynamic stage
+                finalRenderStageController.advanceStage(RenderStage.Dynamic)
+                return stream
               }
             )
-          },
-          () => {
-            // Dynamic stage
-            requestStore.prerenderPhase = false
-          }
         )
 
         reactServerResult = new ReactServerResult(finalServerStream)

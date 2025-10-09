@@ -68,7 +68,6 @@ async fn node_file_trace_operation(
     let workspace_fs: Vc<Box<dyn FileSystem>> = Vc::upcast(DiskFileSystem::new(
         rcstr!("workspace"),
         project_root.clone(),
-        None,
     ));
     let input_dir = workspace_fs.root().await?;
     let input = input_dir.join(&format!("{input}"))?;

@@ -227,6 +227,38 @@ const isReact18 = parseInt(process.env.NEXT_TEST_REACT_VERSION) === 18
       `)
     })
 
+    it('should not include .next directory in traces despite dynamic fs operations', async () => {
+      // This test verifies that the denied_path feature prevents the .next directory
+      // from being included in traces. The app/dynamic-read page uses dynamic fs.readFileSync
+      // with path.join(process.cwd(), ...) which could theoretically read any file.
+      //
+      // Without denied_path protection, this caused a real customer issue where the entire
+      // .next directory was included in their bundle, causing massive bundle sizes.
+      //
+      // We verify that NO files from .next are included in any traces.
+
+      // Check both the general server traces and the specific page trace
+      const traceFiles = [
+        '.next/next-server.js.nft.json',
+        '.next/next-minimal-server.js.nft.json',
+      ]
+
+      for (const traceFile of traceFiles) {
+        let trace = await readNormalizedNFT(traceFile)
+
+        // Filter to see if any .next files are included
+        const nextFiles = trace.filter((file: string) =>
+          file.includes('/.next/')
+        )
+
+        // Assert that NO .next files are in the trace
+        expect(nextFiles).withContext(`in ${traceFile}`).toEqual([])
+
+        // Sanity check - ensure we still have legitimate traces
+        expect(trace.length).toBeGreaterThan(0)
+      }
+    })
+
     it('should not trace too many files in next-minimal-server.js.nft.json', async () => {
       let trace = await readNormalizedNFT(
         '.next/next-minimal-server.js.nft.json'

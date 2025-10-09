@@ -1248,6 +1248,8 @@ function assignDefaultsAndValidate(
     )
   }
 
+  // Save the root distDir before modifying it for isolatedDevBuild
+  ;(result as NextConfigComplete).distDirRoot = result.distDir
   if (
     phase === PHASE_DEVELOPMENT_SERVER &&
     result.experimental?.isolatedDevBuild

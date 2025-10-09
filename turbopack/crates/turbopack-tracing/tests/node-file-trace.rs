@@ -342,11 +342,12 @@ async fn node_file_trace_operation(
     let workspace_fs: Vc<Box<dyn FileSystem>> = Vc::upcast(DiskFileSystem::new(
         rcstr!("workspace"),
         package_root.clone(),
+        None,
     ));
     let input_dir = workspace_fs.root().owned().await?;
     let input = input_dir.join(&format!("tests/{input}"))?;
 
-    let output_fs = DiskFileSystem::new(rcstr!("output"), directory.clone());
+    let output_fs = DiskFileSystem::new(rcstr!("output"), directory.clone(), None);
     let output_dir = output_fs.root().owned().await?;
 
     let source = FileSource::new(input);

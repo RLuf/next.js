@@ -262,6 +262,10 @@ struct DiskFileSystemInner {
 
     #[turbo_tasks(debug_ignore, trace_ignore)]
     watcher: DiskWatcher,
+    /// A root path that we do not allow access to from this filesystem.
+    /// Useful for things like output directories to prevent accidental orobourous situations.
+    #[turbo_tasks(debug_ignore, trace_ignore)]
+    denied_path: Option<RcStr>,
 }
 
 impl DiskFileSystemInner {
@@ -555,6 +559,15 @@ fn format_absolute_fs_path(path: &Path, name: &str, root_path: &Path) -> Option<
     }
 }
 
+impl DiskFileSystem {
+    pub fn new(name: RcStr, root: RcStr) -> Vc<Self> {
+        Self::new_internal(name, root, None)
+    }
+    pub fn new_with_denied_path(name: RcStr, root: RcStr, denied_path: RcStr) -> Vc<Self> {
+        Self::new_internal(name, root, Some(denied_path))
+    }
+}
+
 #[turbo_tasks::value_impl]
 impl DiskFileSystem {
     /// Create a new instance of `DiskFileSystem`.
@@ -563,8 +576,10 @@ impl DiskFileSystem {
     /// * `name` - Name of the filesystem.
     /// * `root` - Path to the given filesystem's root. Should be
     ///   [canonicalized][std::fs::canonicalize].
+    /// * `denied_path` - A path within this filesystem that is not allowed to be accessed or
+    ///   navigated into
     #[turbo_tasks::function]
-    pub fn new(name: RcStr, root: RcStr) -> Result<Vc<Self>> {
+    fn new_internal(name: RcStr, root: RcStr, denied_path: Option<RcStr>) -> Vc<Self> {
         mark_stateful();
 
         let instance = DiskFileSystem {
@@ -577,10 +592,11 @@ impl DiskFileSystem {
                 dir_invalidator_map: InvalidatorMap::new(),
                 semaphore: create_semaphore(),
                 watcher: DiskWatcher::new(),
+                denied_path,
             }),
         };
 
-        Ok(Self::cell(instance))
+        Self::cell(instance)
     }
 }
 

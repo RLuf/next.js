@@ -2,7 +2,7 @@ use std::{collections::HashSet, env::current_dir, path::PathBuf};
 
 use anyhow::Result;
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{ResolvedVc, TransientInstance, TryJoinIterExt, ValueToString, Vc};
+use turbo_tasks::{ReadRef, ResolvedVc, TransientInstance, TryJoinIterExt, ValueToString, Vc};
 use turbo_tasks_fs::{DiskFileSystem, FileSystem};
 use turbopack::{
     ModuleAssetContext,
@@ -68,8 +68,9 @@ async fn node_file_trace_operation(
     let workspace_fs: Vc<Box<dyn FileSystem>> = Vc::upcast(DiskFileSystem::new(
         rcstr!("workspace"),
         project_root.clone(),
+        None,
     ));
-    let input_dir = workspace_fs.root().owned().await?;
+    let input_dir = workspace_fs.root().await?;
     let input = input_dir.join(&format!("{input}"))?;
 
     let source = FileSource::new(input);
@@ -102,7 +103,7 @@ async fn node_file_trace_operation(
         .cell(),
         ResolveOptionsContext {
             enable_node_native_modules: true,
-            enable_node_modules: Some(input_dir.clone()),
+            enable_node_modules: Some(ReadRef::into_owned(input_dir.clone())),
             custom_conditions: vec![rcstr!("node")],
             loose_errors: true,
             collect_affecting_sources: true,

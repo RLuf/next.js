@@ -132,6 +132,31 @@ function checkDeprecations(
 
   warnOptionHasBeenDeprecated(
     userConfig,
+    'experimental.middlewarePrefetch',
+    `\`experimental.middlewarePrefetch\` is deprecated. Please use \`experimental.proxyPrefetch\` instead in ${configFileName}.`,
+    silent
+  )
+  warnOptionHasBeenDeprecated(
+    userConfig,
+    'experimental.middlewareClientMaxBodySize',
+    `\`experimental.middlewareClientMaxBodySize\` is deprecated. Please use \`experimental.proxyClientMaxBodySize\` instead in ${configFileName}.`,
+    silent
+  )
+  warnOptionHasBeenDeprecated(
+    userConfig,
+    'experimental.externalMiddlewareRewritesResolve',
+    `\`experimental.externalMiddlewareRewritesResolve\` is deprecated. Please use \`experimental.externalProxyRewritesResolve\` instead in ${configFileName}.`,
+    silent
+  )
+  warnOptionHasBeenDeprecated(
+    userConfig,
+    'skipMiddlewareUrlNormalize',
+    `\`skipMiddlewareUrlNormalize\` is deprecated. Please use \`skipProxyUrlNormalize\` instead in ${configFileName}.`,
+    silent
+  )
+
+  warnOptionHasBeenDeprecated(
+    userConfig,
     'experimental.instrumentationHook',
     `\`experimental.instrumentationHook\` is no longer needed, because \`instrumentation.js\` is available by default. You can remove it from ${configFileName}.`,
     silent
@@ -1253,6 +1278,31 @@ function assignDefaultsAndValidate(
     result.experimental?.isolatedDevBuild
   ) {
     result.distDir = join(result.distDir, 'dev')
+  }
+
+  // Map Proxy config to Middleware config as it is currently an alias.
+  if (
+    result.experimental.proxyClientMaxBodySize &&
+    !result.experimental.middlewareClientMaxBodySize
+  ) {
+    result.experimental.middlewareClientMaxBodySize =
+      result.experimental.proxyClientMaxBodySize
+  }
+  if (
+    result.experimental.proxyPrefetch &&
+    !result.experimental.middlewarePrefetch
+  ) {
+    result.experimental.middlewarePrefetch = result.experimental.proxyPrefetch
+  }
+  if (
+    result.experimental.externalProxyRewritesResolve &&
+    !result.experimental.externalMiddlewareRewritesResolve
+  ) {
+    result.experimental.externalMiddlewareRewritesResolve =
+      result.experimental.externalProxyRewritesResolve
+  }
+  if (result.skipProxyUrlNormalize && !result.skipMiddlewareUrlNormalize) {
+    result.skipMiddlewareUrlNormalize = result.skipProxyUrlNormalize
   }
 
   return result as NextConfigComplete
